@@ -11,7 +11,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 // Constants
 const MOUSE = new THREE.Vector2()
 const MOUSE_POSITIONS = []
-const MAX_MOUSE_POS_LENGTH = 100
+const MAX_MOUSE_POS_LENGTH = 100000
+const MAX_PROPAGATION_TIME = 1000
 
 // Debug
 const params = {
@@ -58,7 +59,7 @@ const controls = new OrbitControls(camera, canvas)
 controls.target.set(0, 0, 0)
 controls.enableDamping = true
 controls.autoRotateSpeed = 0.5
-controls.autoRotate = true
+// controls.autoRotate = true
 
 /**
  * Renderer
@@ -95,51 +96,6 @@ window.addEventListener('resize', onResize)
  */
 const clock = new THREE.Clock()
 let previousTime = 0
-
-const tick = () => {
-  stats.begin()
-
-  const elapsedTime = clock.getElapsedTime()
-  const deltaTime = elapsedTime - previousTime
-  previousTime = elapsedTime
-
-  // Update controls
-  controls.update(elapsedTime)
-
-  // Ribbon
-  ribbons.forEach(ribbon => {
-    ribbon.material.roughness = params.roughness
-    ribbon.material.metalness = params.metalness
-    ribbon.material.alphaMap.offset.x += (deltaTime * 0.1) * ribbon.speed
-  })
-
-  // ribbon.material.forEach((material, index) => {
-  //   material.map.offset.x += deltaTime * 0.05 * (index ? -1 : 1)
-
-  //   // Offset alphaMap justonce because the same texture is used by the two materials
-  //   if (!index) {
-  //     material.alphaMap.offset.x += deltaTime * 0.05
-  //   }
-  //   material.roughness = params.roughness
-  //   material.metalness = params.metalness
-
-  //   material.needsUpdate = true
-  // })
-
-  // Lights
-  // lights.forEach(light => {
-  //   light.position.x += Math.cos(elapsedTime) * 0.001
-  //   light.position.z += Math.sin(elapsedTime) * 0.001
-  //   light.lookAt(scene.position)
-  // })
-
-  renderer.render(scene, camera)
-
-  stats.end()
-
-  // Call tick again on the next frame
-  window.requestAnimationFrame(tick)
-}
 
 const lights = []
 const addLights = () => {
@@ -182,7 +138,19 @@ const addHelper = () => {
   )
 }
 
-let ribbon, curveObject, ribbons = []
+let ribbon2
+const addRibon1 = () => {
+  ribbon2 = new THREE.Mesh(
+    new THREE.PlaneGeometry(.1, 1, 1, MAX_MOUSE_POS_LENGTH - 1),
+    new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide })
+  )
+
+  ribbon2.rotation.x = Math.PI / 2
+
+  scene.add(ribbon2)
+}
+
+let ribbon, curveObject
 
 const addRibbon = () => {
   const pointsLen = 20
@@ -258,18 +226,29 @@ const addRibbon = () => {
   // ribbon.receiveShadow = true
 
   scene.add(ribbon)
-
-  ribbons.push(ribbon)
   
   params.reset = () => {
-    ribbons.forEach(ribbon => {
-      scene.remove(ribbon)
-    })
-
-    // scene.remove(ribbon)
-    // scene.remove(curveObject)
-    addRibbons()
+    scene.remove(ribbon)
+    addRibbon()
   }
+}
+
+const updateRibbon = () => {
+  // console.log(ribbon2.geometry.attributes)
+
+  const position = ribbon2.geometry.attributes.position.array
+
+  for (let i = 0; i < position.length; i+= 3) {
+    const index = Math.floor(i / (3 * 2))
+
+    if (MOUSE_POSITIONS[index]) {
+      position[i + 0] = MOUSE_POSITIONS[index].x // x
+      position[i + 1] = MOUSE_POSITIONS[index].y // y
+      // const z = position[i + 2]
+    }
+  }
+
+  ribbon2.geometry.attributes.position.needsUpdate = true
 }
 
 const addPlane = () => {
@@ -291,58 +270,42 @@ const addPlane = () => {
   scene.add(mesh)
 }
 
-const addSmallPlane = () => {
-  const textureLoader = new THREE.TextureLoader()
-  const texture = textureLoader.load('/semi-opaque-texture.png')
-  texture.minFilter = texture.magFilter = THREE.NearestFilter
-
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(1, 1),
-    new THREE.MeshBasicMaterial({
-      map: texture,
-      side: THREE.DoubleSide,
-      transparent: true,
-      alphaMap: textureLoader.load('/alphamap.png'),
-      alphaTest: .5
-    })
-  )
-  // mesh.receiveShadow = true
-  mesh.castShadow = true
-  mesh.position.y = -.5
-  mesh.position.x = 2 
-  scene.add(mesh)
-}
-
-const addBox = () => {
-  const mesh = new THREE.Mesh(
-    new THREE.BoxGeometry(.4, .4, .4),
-    new THREE.MeshStandardMaterial({ color: 0x00ff00 })
-  )
-  mesh.position.x = -2
-  mesh.position.y = -.5
-  mesh.castShadow = true
-  mesh.receiveShadow = true
-  scene.add(mesh)
-}
-
 let gui
 const addGUI = () => {
   gui = new dat.GUI()
 
   gui.add(params, 'roughness', 0, 1, .001)
   gui.add(params, 'metalness', 0, 1, .001)
-  gui.add(params, 'ribbonsLength', 1, 500, 1).onChange(addRibbons)
-  gui.add(params, 'ribbonsMaxWidth',  0.05, 1, .001).onChange(addRibbons)
-  gui.add(params, 'reset')
+  // gui.add(params, 'ribbonsLength', 1, 500, 1).onChange(addRibbons)
+  // gui.add(params, 'ribbonsMaxWidth',  0.05, 1, .001).onChange(addRibbons)
+  // gui.add(params, 'reset')
   gui.add(controls, 'autoRotate')
 }
 
 const addEvents = () => {
   window.addEventListener('mousemove', e => {
-    MOUSE.x = e.clientX - sizes.width / 2
-    MOUSE.y = - e.clientY + sizes.height / 2
+    const vec = new THREE.Vector3() // create once and reuse
+    const pos = new THREE.Vector3() // create once and reuse
 
-    MOUSE_POSITIONS.push(Object.assign({}, MOUSE))
+    vec.set(
+      (e.clientX / window.innerWidth) * 2 - 1,
+      - (e.clientY / window.innerHeight) * 2 + 1,
+      0.5
+    )
+
+    vec.unproject(camera)
+    vec.sub(camera.position).normalize()
+
+    const distance = - (1 - camera.position.z) / vec.z
+
+    pos.copy(camera.position).add(vec.multiplyScalar(distance))
+
+    // MOUSE.x = e.clientX - sizes.width / 2
+    // MOUSE.y = - e.clientY + sizes.height / 2
+
+    MOUSE_POSITIONS.push(pos)
+
+    console.log(pos)
 
     if (MOUSE_POSITIONS.length > MAX_MOUSE_POS_LENGTH) {
       MOUSE_POSITIONS.shift()
@@ -350,22 +313,36 @@ const addEvents = () => {
   })
 }
 
-const addRibbons = () => {
-  ribbons.forEach(ribbon => {
-    scene.remove(ribbon)
-  })
+const tick = () => {
+  stats.begin()
 
-  for (let i = 0; i < params.ribbonsLength; i++) {
-    addRibbon()
-  }
+  const elapsedTime = clock.getElapsedTime()
+  const deltaTime = elapsedTime - previousTime
+  previousTime = elapsedTime
+
+  // Update controls
+  controls.update(elapsedTime)
+
+  // Ribbon
+  // ribbons.forEach(ribbon => {
+  //   ribbon.material.roughness = params.roughness
+  //   ribbon.material.metalness = params.metalness
+  // })
+
+  updateRibbon()
+
+  renderer.render(scene, camera)
+
+  stats.end()
+
+  // Call tick again on the next frame
+  window.requestAnimationFrame(tick)
 }
 
 addEvents()
-addRibbons()
+// addRibbon()
+addRibon1()
 addPlane()
-// addSmallPlane()
-// addBox()
 addLights()
 addGUI()
-// addHelper()
 tick()
