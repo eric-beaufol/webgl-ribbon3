@@ -9,17 +9,17 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
  */
 
 // Constants
-const MOUSE = new THREE.Vector2()
-const MOUSE_POSITIONS = []
-const MAX_MOUSE_POS_LENGTH = 100000
-const MAX_PROPAGATION_TIME = 1000
+const MOUSE = new THREE.Vector3()
+const MAX_MOUSE_POS_LENGTH = 50
+const MOUSE_POSITIONS = new Array(MAX_MOUSE_POS_LENGTH).fill(new THREE.Vector3())
 
 // Debug
 const params = {
   roughness: 0.57,
   metalness: .1,
-  ribbonsLength: 20,
-  ribbonsMaxWidth: .5
+  ribbonHeight: 7,
+  ribbonMaxWidth: .5,
+  anchorPointZ: -5 
 }
 
 // Stats
@@ -44,6 +44,8 @@ const sizes = {
  * Render target
  */
 
+window.THREE = THREE
+
 
 /**
  * Camera
@@ -51,7 +53,7 @@ const sizes = {
 // Base camera
 const { width, height } = sizes
 const camera = new THREE.PerspectiveCamera(75, width / height, .1, 100)
-camera.position.set(0, -0.25, 1.5)
+camera.position.set(0, 1.5, 2.5)
 scene.add(camera)
 
 // Controls
@@ -68,7 +70,7 @@ const renderer = new THREE.WebGLRenderer({
   canvas: canvas,
   antialias: true
 })
-renderer.setClearColor(0xffffff, 1)
+// renderer.setClearColor(0xffffff, 1)
 renderer.shadowMap.enabled = true
 renderer.shadowMap.type = THREE.PCFShadowMap
 renderer.shadowMap.type = THREE.VSMShadowMap
@@ -109,7 +111,7 @@ const addLights = () => {
   directionalLight.shadow.mapSize.width = 2048
   directionalLight.shadow.mapSize.height = 2048
   directionalLight.shadow.camera.near = 0.1
-  directionalLight.shadow.camera.far = 15
+  directionalLight.shadow.camera.far = 150
   directionalLight.shadow.camera.top = lightShadowMapSize
   directionalLight.shadow.camera.bottom = -lightShadowMapSize
   directionalLight.shadow.camera.left = -lightShadowMapSize
@@ -132,142 +134,70 @@ const addLights = () => {
   lights.push(directionalLight, directionalLight1)
 }
 
+let vHelper1, vHelper2
 const addHelper = () => {
-  scene.add(
-    new THREE.GridHelper()
-  )
-}
-
-let ribbon2
-const addRibon1 = () => {
-  ribbon2 = new THREE.Mesh(
-    new THREE.PlaneGeometry(.1, 1, 1, MAX_MOUSE_POS_LENGTH - 1),
-    new THREE.MeshBasicMaterial({ color: 0xff0000, side: THREE.DoubleSide })
-  )
-
-  ribbon2.rotation.x = Math.PI / 2
-
-  scene.add(ribbon2)
-}
-
-let ribbon, curveObject
-
-const addRibbon = () => {
-  const pointsLen = 20
-  const pointsArr = []
-  
-  // add point around a sphere of radius 1
-  for (let i = 0; i < pointsLen; i++) {
-
-    pointsArr.push(
-      new THREE.Vector3(
-        Math.random() - 0.5,
-        Math.random() - 0.5,
-        Math.random() - 0.5
-      )
-    )
+  if (!vHelper1) {
+    vHelper1 = new THREE.GridHelper(30, 30, 0xff0000)
+    vHelper1.rotation.x = Math.PI / 2
+    scene.add(vHelper1)
   }
 
-  //Create a closed wavey loop
-  const curve = new THREE.CatmullRomCurve3(pointsArr, true, 'catmullrom')
+  vHelper1.position.z = params.anchorPointZ
 
-  const points = curve.getPoints(550)
-  const geometry = new THREE.BufferGeometry().setFromPoints(points)
-  const color = Math.random() * 0xff0000
-  const material = new THREE.LineBasicMaterial({ color })
+  if (!vHelper2) {
+    vHelper2 = new THREE.GridHelper(10, 10, 0x00ff00)
+    vHelper2.rotation.x = Math.PI / 2
+    vHelper2.position.z = 0
+    vHelper2.color = 0x00ffff
+    scene.add(vHelper2)
+  }
+}
 
-  // Create the final object to add to the scene
-  curveObject = new THREE.Line(geometry, material)
-  // scene.add(curveObject)
+let ribbon
+const addRibbon = () => {
+  if (ribbon) {
+    scene.remove(ribbon)
+  }
 
-  const ribbonWidth = Math.random() * 0.04 * params.ribbonsMaxWidth
-  const number = 2000
-  const frenetFrames = curve.computeFrenetFrames(number, true)
-  const spacedPoints = curve.getSpacedPoints(number)
-  const distances = [-ribbonWidth, ribbonWidth]
-  const finalPoints = []
-  const alphaMapTexture = new THREE.TextureLoader().load('/ribbon-alphamap.png')
-  alphaMapTexture.wrapS = alphaMapTexture.wrapT = THREE.RepeatWrapping
+  const { ribbonHeight } = params
 
   ribbon = new THREE.Mesh(
-    new THREE.PlaneGeometry(1, 1, number),
-    new THREE.MeshStandardMaterial({ 
-      color, 
-      side: THREE.DoubleSide,
-      roughness: params.roughness,
-      metalness: params.metalness,
-      alphaMap: alphaMapTexture,
-      alphaTest: .5,
-      // wireframe: true
-    })
+    new THREE.PlaneGeometry(.1, ribbonHeight, 1, MAX_MOUSE_POS_LENGTH - 1),
+    // new THREE.CylinderGeometry(.03, .03, 30, 7, MAX_MOUSE_POS_LENGTH - 1),
+    new THREE.MeshStandardMaterial({ color: 0xff0000, side: THREE.DoubleSide })
   )
-
-  distances.forEach(dist => {
-    let firstPointClone
-
-    for (let i = 0; i < number; i++) {
-      const point = new THREE.Vector3().copy(spacedPoints[i])
-      const binormal = new THREE.Vector3().copy(frenetFrames.binormals[i])
-      point.add(binormal.multiplyScalar(dist))
-      finalPoints.push(point)
-
-      if (i === 0) {
-        firstPointClone = point.clone()
-      }
-    }
-
-    finalPoints.push(firstPointClone)
-  })
-
-  ribbon.geometry.setFromPoints(finalPoints)
-  ribbon.geometry.computeVertexNormals()
-  ribbon.castShadow = true
-  ribbon.speed = Math.random() * 0.9 + 0.1
-  // ribbon.receiveShadow = true
+  
+  const ribbonZ = -ribbonHeight/2 - params.anchorPointZ
+  ribbon.geometry.translate(0, ribbonZ, 0)
+  ribbon.rotation.x = -Math.PI / 2 
 
   scene.add(ribbon)
-  
-  params.reset = () => {
-    scene.remove(ribbon)
-    addRibbon()
-  }
 }
 
 const updateRibbon = () => {
-  // console.log(ribbon2.geometry.attributes)
+  const position = ribbon.geometry.attributes.position.array
 
-  const position = ribbon2.geometry.attributes.position.array
-
-  for (let i = 0; i < position.length; i+= 3) {
-    const index = Math.floor(i / (3 * 2))
+  for (let i = 0; i < position.length; i += 3) {
+    const index = (MAX_MOUSE_POS_LENGTH - 1) - Math.floor(i / 3 / 2)
 
     if (MOUSE_POSITIONS[index]) {
-      position[i + 0] = MOUSE_POSITIONS[index].x // x
-      position[i + 1] = MOUSE_POSITIONS[index].y // y
-      // const z = position[i + 2]
+      position[i + 0] = MOUSE_POSITIONS[index].x
+      position[i + 2] = MOUSE_POSITIONS[index].y
+      position[i + 0] += i % 2 ? .2 : -0.2
     }
   }
 
-  ribbon2.geometry.attributes.position.needsUpdate = true
+  ribbon.geometry.attributes.position.needsUpdate = true
 }
 
-const addPlane = () => {
-  const mesh = new THREE.Mesh(
-    new THREE.PlaneGeometry(10, 10),
-    new THREE.MeshStandardMaterial({
-      // color: 0xd7fdd2,
-      color: 0xffffff,
-      // emissive: 0xffffff,
-      wireframe: false,
-      side: THREE.DoubleSide
-    })
+let box
+const addBox = () => {
+  box = new THREE.Mesh(
+    new THREE.BoxGeometry(1, 1, 1),
+    new THREE.MeshBasicMaterial({ color: 0x00ffff })
   )
-
-  mesh.rotateX(Math.PI / 2)
-  mesh.position.y = -.7
-  mesh.receiveShadow = true
-
-  scene.add(mesh)
+  box.position.z = params.anchorPointZ
+  scene.add(box)
 }
 
 let gui
@@ -280,37 +210,46 @@ const addGUI = () => {
   // gui.add(params, 'ribbonsMaxWidth',  0.05, 1, .001).onChange(addRibbons)
   // gui.add(params, 'reset')
   gui.add(controls, 'autoRotate')
+  gui.add(params, 'ribbonHeight', 7, 60).onChange(addRibbon)
+  gui.add(params, 'anchorPointZ', -40, -5).onChange(() => {
+    addRibbon()
+    addHelper()
+    box.position.z = params.anchorPointZ
+  })
+}
+
+const onMouseMove = e => {
+  // return
+  const vec = new THREE.Vector3() // create once and reuse
+  const pos = new THREE.Vector3() // create once and reuse
+
+  vec.set(
+    (e.clientX / window.innerWidth) * 2 - 1,
+    - (e.clientY / window.innerHeight) * 2 + 1,
+    0.5
+  )
+
+  vec.unproject(camera)
+  vec.sub(camera.position).normalize()
+  pos.copy(camera.position).add(vec)
+
+  // Method #1 (failed)
+  const offsetCamToVec = pos.clone().sub(camera.position)
+  const offsetAnchorPointZ = params.anchorPointZ - camera.position.z
+  const ratio = offsetAnchorPointZ / offsetCamToVec.z
+  const offsetX = offsetCamToVec.x * ratio
+  const offsetY = offsetCamToVec.y * ratio
+  const x = camera.position.x + offsetX
+  const y = camera.position.y + offsetY
+  const position = new THREE.Vector3(x, y, params.anchorPointZ)
+
+  pos.copy(position)
+  MOUSE.copy(pos)
+  box.position.copy(pos)
 }
 
 const addEvents = () => {
-  window.addEventListener('mousemove', e => {
-    const vec = new THREE.Vector3() // create once and reuse
-    const pos = new THREE.Vector3() // create once and reuse
-
-    vec.set(
-      (e.clientX / window.innerWidth) * 2 - 1,
-      - (e.clientY / window.innerHeight) * 2 + 1,
-      0.5
-    )
-
-    vec.unproject(camera)
-    vec.sub(camera.position).normalize()
-
-    const distance = - (1 - camera.position.z) / vec.z
-
-    pos.copy(camera.position).add(vec.multiplyScalar(distance))
-
-    // MOUSE.x = e.clientX - sizes.width / 2
-    // MOUSE.y = - e.clientY + sizes.height / 2
-
-    MOUSE_POSITIONS.push(pos)
-
-    console.log(pos)
-
-    if (MOUSE_POSITIONS.length > MAX_MOUSE_POS_LENGTH) {
-      MOUSE_POSITIONS.shift()
-    }
-  })
+  window.addEventListener('mousemove', onMouseMove)
 }
 
 const tick = () => {
@@ -322,6 +261,12 @@ const tick = () => {
 
   // Update controls
   controls.update(elapsedTime)
+
+  MOUSE_POSITIONS.push(MOUSE.clone())
+
+  if (MOUSE_POSITIONS.length > MAX_MOUSE_POS_LENGTH) {
+    MOUSE_POSITIONS.shift()
+  }
 
   // Ribbon
   // ribbons.forEach(ribbon => {
@@ -340,9 +285,9 @@ const tick = () => {
 }
 
 addEvents()
-// addRibbon()
-addRibon1()
-addPlane()
+addRibbon()
+addBox()
 addLights()
 addGUI()
+addHelper()
 tick()
