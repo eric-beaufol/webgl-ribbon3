@@ -3,24 +3,49 @@ import * as THREE from 'three'
 import * as dat from 'lil-gui'
 import Stats from 'stats.js'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
+import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer'
+import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass'
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass'
+import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass'
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass'
+import AudioAnalyser from './AudioAnalyzer'
 
 /**
  * Base
  */
 
-// Constants
-const MOUSE = new THREE.Vector3()
-const MAX_MOUSE_POS_LENGTH = 50
-const MOUSE_POSITIONS = new Array(MAX_MOUSE_POS_LENGTH).fill(new THREE.Vector3())
-
 // Debug
 const params = {
+  // Ribbon
   roughness: 0.57,
   metalness: .1,
-  ribbonHeight: 7,
+  ribbonHeight: 20,
   ribbonMaxWidth: .5,
-  anchorPointZ: -5 
+  anchorPointZ: -5,
+  ribbonRadius: .1,
+  ribbonSegments: 60,
+  friction: 0.1,
+  ribbonsCount: 10,
+  followMouse: true,
+  autoMove: false,
+  moveInterval: 2,
+  spread: 1,
+  // Unreal bloom
+  active: true,
+  threshold: 0,
+  strength: 0.2,
+  radius: 0,
+  exposure: 1,
+  // general
+  helpers: false,
 }
+
+// Constants
+const MOUSE_TARGET = new THREE.Vector3()
+const MOUSE = new THREE.Vector3()
+let mousePositions = getMousePositions()
+const ribbons = []
+const colors = ['']
 
 // Stats
 const stats = new Stats()
@@ -53,7 +78,7 @@ window.THREE = THREE
 // Base camera
 const { width, height } = sizes
 const camera = new THREE.PerspectiveCamera(75, width / height, .1, 100)
-camera.position.set(0, 1.5, 2.5)
+camera.position.set(-1, -0.5, 2.5)
 scene.add(camera)
 
 // Controls
@@ -89,6 +114,11 @@ function onResize() {
   // Update renderer
   renderer.setSize(sizes.width, sizes.height)
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2))
+  composer.setSize(sizes.width, sizes.height)
+}
+
+function getMousePositions() {
+  return new Array(params.ribbonSegments).fill(new THREE.Vector3())
 }
 
 window.addEventListener('resize', onResize)
@@ -97,15 +127,14 @@ window.addEventListener('resize', onResize)
  * Animate
  */
 const clock = new THREE.Clock()
-let previousTime = 0
 
 const lights = []
 const addLights = () => {
-  const ambientLight = new THREE.AmbientLight(0xffffff, .6)
+  const ambientLight = new THREE.AmbientLight(0xffffff, 1)
   scene.add(ambientLight)
 
   const lightShadowMapSize = 3
-  const directionalLight = new THREE.DirectionalLight(0xffffff, .7)
+  const directionalLight = new THREE.DirectionalLight(0xffffff, 1)
   directionalLight.position.set(1, 2, 4)
   directionalLight.castShadow = true
   directionalLight.shadow.mapSize.width = 2048
@@ -135,7 +164,7 @@ const addLights = () => {
 }
 
 let vHelper1, vHelper2
-const addHelper = () => {
+const addHelpers = () => {
   if (!vHelper1) {
     vHelper1 = new THREE.GridHelper(30, 30, 0xff0000)
     vHelper1.rotation.x = Math.PI / 2
@@ -151,75 +180,101 @@ const addHelper = () => {
     vHelper2.color = 0x00ffff
     scene.add(vHelper2)
   }
+
+  addBox()
+
+  vHelper1.visible = vHelper2.visible = box.visible = params.helpers
 }
 
-let ribbon
-const addRibbon = () => {
-  if (ribbon) {
-    scene.remove(ribbon)
+let baseGeometry
+
+const addRibbons = () => {
+  const { ribbonHeight, ribbonRadius } = params
+  const ribbonZ = -ribbonHeight / 2 - params.anchorPointZ
+
+  for (let i = 0; i < params.ribbonsCount; i++) {
+    const randRadius = ribbonRadius * (Math.random() * 0.9 + 0.1)
+
+    const baseGeometry = new THREE.CylinderGeometry(
+      randRadius * 0.01, 
+      randRadius, 
+      ribbonHeight, 
+      7, 
+      params.ribbonSegments - 1,
+      true
+    )
+    baseGeometry.translate(0, ribbonZ, 0)
+
+    const color = new THREE.Color().setHSL(Math.random(), 1, .5)
+
+    const mesh = new THREE.Mesh(
+      baseGeometry.clone(),
+      new THREE.MeshBasicMaterial({ 
+        color,
+        side: THREE.DoubleSide 
+      })
+    )
+    
+    // mesh.geometry.translate(0, ribbonZ, 0)
+    mesh.rotation.x = -Math.PI / 2
+    mesh.userData.id = i
+    mesh.userData.offset = new THREE.Vector2(
+      THREE.MathUtils.randFloatSpread(.5 + 1),
+      THREE.MathUtils.randFloatSpread(.5 + 1)
+    )
+    mesh.userData.baseGeometry = baseGeometry
+
+    ribbons.push(mesh)
   }
 
-  const { ribbonHeight } = params
-
-  ribbon = new THREE.Mesh(
-    new THREE.PlaneGeometry(.1, ribbonHeight, 1, MAX_MOUSE_POS_LENGTH - 1),
-    // new THREE.CylinderGeometry(.03, .03, 30, 7, MAX_MOUSE_POS_LENGTH - 1),
-    new THREE.MeshStandardMaterial({ color: 0xff0000, side: THREE.DoubleSide })
-  )
-  
-  const ribbonZ = -ribbonHeight/2 - params.anchorPointZ
-  ribbon.geometry.translate(0, ribbonZ, 0)
-  ribbon.rotation.x = -Math.PI / 2 
-
-  scene.add(ribbon)
+  scene.add(...ribbons)
 }
 
-const updateRibbon = () => {
-  const position = ribbon.geometry.attributes.position.array
+const removeRibbons = () => {
+  scene.remove(...ribbons)
+  ribbons.length = 0
+}
 
-  for (let i = 0; i < position.length; i += 3) {
-    const index = (MAX_MOUSE_POS_LENGTH - 1) - Math.floor(i / 3 / 2)
+const updateRibbons = () => {
+  ribbons.forEach(ribbon => {
+    const position = ribbon.geometry.attributes.position.array
+    const basePosition = ribbon.userData.baseGeometry.attributes.position.array
 
-    if (MOUSE_POSITIONS[index]) {
-      position[i + 0] = MOUSE_POSITIONS[index].x
-      position[i + 2] = MOUSE_POSITIONS[index].y
-      position[i + 0] += i % 2 ? .2 : -0.2
+    for (let i = 0; i < position.length; i += 3) {
+      const index = (params.ribbonSegments - 1) - Math.floor(i / 3 / 8)
+      const { offset } = ribbon.userData
+
+      // For plane geometry
+      if (mousePositions[index]) {
+        const ratio = i / position.length * params.spread
+
+        position[i + 0] = basePosition[i + 0] + mousePositions[index].x + offset.x * ratio // x
+        position[i + 2] = basePosition[i + 2] + mousePositions[index].y + offset.y * ratio // y
+      }
     }
-  }
 
-  ribbon.geometry.attributes.position.needsUpdate = true
+    ribbon.geometry.attributes.position.needsUpdate = true
+  })
 }
 
 let box
 const addBox = () => {
-  box = new THREE.Mesh(
-    new THREE.BoxGeometry(1, 1, 1),
-    new THREE.MeshBasicMaterial({ color: 0x00ffff })
-  )
+  if (!box) {
+    box = new THREE.Mesh(
+      new THREE.BoxGeometry(1, 1, .2),
+      new THREE.MeshBasicMaterial({ color: 0x00ffff, wireframe: true })
+    )
+    scene.add(box)
+  }
+
   box.position.z = params.anchorPointZ
-  scene.add(box)
-}
-
-let gui
-const addGUI = () => {
-  gui = new dat.GUI()
-
-  gui.add(params, 'roughness', 0, 1, .001)
-  gui.add(params, 'metalness', 0, 1, .001)
-  // gui.add(params, 'ribbonsLength', 1, 500, 1).onChange(addRibbons)
-  // gui.add(params, 'ribbonsMaxWidth',  0.05, 1, .001).onChange(addRibbons)
-  // gui.add(params, 'reset')
-  gui.add(controls, 'autoRotate')
-  gui.add(params, 'ribbonHeight', 7, 60).onChange(addRibbon)
-  gui.add(params, 'anchorPointZ', -40, -5).onChange(() => {
-    addRibbon()
-    addHelper()
-    box.position.z = params.anchorPointZ
-  })
 }
 
 const onMouseMove = e => {
-  // return
+  if (!params.followMouse) {
+    return
+  }
+
   const vec = new THREE.Vector3() // create once and reuse
   const pos = new THREE.Vector3() // create once and reuse
 
@@ -244,39 +299,156 @@ const onMouseMove = e => {
   const position = new THREE.Vector3(x, y, params.anchorPointZ)
 
   pos.copy(position)
-  MOUSE.copy(pos)
-  box.position.copy(pos)
+  MOUSE_TARGET.copy(new THREE.Vector2(pos.x, pos.y))
+
+  if (box) {
+    box.position.copy(pos)
+  }
 }
 
 const addEvents = () => {
   window.addEventListener('mousemove', onMouseMove)
 }
 
+const updateMousePoints = () => {
+  MOUSE.add(MOUSE_TARGET.clone().sub(MOUSE).multiplyScalar(params.friction))
+
+  mousePositions.push(MOUSE.clone())
+
+  if (mousePositions.length > params.ribbonSegments) {
+    mousePositions.shift()
+  }   
+}
+
+let composer, bloomPass, smaaPass
+const addBloom = () => {
+  // postprocessing
+  const { strength, radius, threshold } = params
+  const renderScene = new RenderPass(scene, camera)
+  bloomPass = new UnrealBloomPass(new THREE.Vector2(sizes.width, sizes.height), strength, radius, threshold)
+  smaaPass = new SMAAPass(sizes.width, sizes.height)
+  const outputPass = new OutputPass()
+  composer = new EffectComposer(renderer)
+  composer.addPass(renderScene)
+  composer.addPass(bloomPass)
+  composer.addPass(smaaPass)
+  composer.addPass(outputPass)
+}
+
+let audioAnalyser
+const addAudio = () => {
+  audioAnalyser = new AudioAnalyser()
+  audioAnalyser.setSource('/mp3/quest.mp3')
+}
+
+let gui
+const addGUI = () => {
+  gui = new dat.GUI()
+
+  const ribbonFolder = gui.addFolder('ribbon')
+
+  ribbonFolder.add(params, 'roughness', 0, 1, .001)
+  ribbonFolder.add(params, 'metalness', 0, 1, .001)
+  ribbonFolder.add(controls, 'autoRotate')
+  ribbonFolder.add(params, 'ribbonHeight', 7, 60).onChange(() => {
+    removeRibbons()
+    addRibbons()
+  })
+  ribbonFolder.add(params, 'anchorPointZ', -40, -5).onChange(() => {
+    removeRibbons()
+    addRibbons()
+    addHelpers()
+    box.position.z = params.anchorPointZ
+  })
+  ribbonFolder.add(params, 'radius', .03, 1).onChange(addRibbons)
+  ribbonFolder.add(params, 'ribbonSegments', 10, 200, 1).onChange(() => {
+    mousePositions = getMousePositions()
+    removeRibbons()
+    addRibbons()
+  })
+  ribbonFolder.add(params, 'friction', 0.01, .1, .001)
+  ribbonFolder.add(params, 'ribbonsCount', 1, 30, 1).name('count').onChange(() => {
+    removeRibbons()
+    addRibbons()
+  })
+  ribbonFolder.add(params, 'spread', 0.1, 10)
+  ribbonFolder.add(params, 'followMouse').listen().onChange(() => {
+    MOUSE_TARGET.set(0, 0)
+    box.position.set(0, 0)
+    params.autoMove = false
+  })
+
+  ribbonFolder.add(params, 'autoMove').listen().onChange(() => {
+    if (params.autoMove) {
+      params.followMouse = false
+    }
+  })
+
+  ribbonFolder.add(params, 'moveInterval', .1, 5)
+
+  const bloomFolder = gui.addFolder('bloom')
+
+  if (bloomPass) {
+    bloomFolder.add(bloomPass, 'strength', 0, 3)
+    bloomFolder.add(bloomPass, 'radius', 0, 1, 0.01)
+    bloomFolder.add(bloomPass, 'threshold', 0, 1)
+  }
+
+  bloomFolder.add(params, 'active')
+
+  const generalFolder = gui.addFolder('general')
+
+  generalFolder.add(params, 'helpers').onChange(() => {
+    vHelper1.visible = vHelper2.visible = box.visible = params.helpers
+  })
+
+  params.reset = () => {
+    removeRibbons()
+    addRibbons()
+  }
+  generalFolder.add(params, 'reset')
+}
+
+let moveTimestamp = 0
+
 const tick = () => {
   stats.begin()
 
+  const delta = clock.getDelta()
   const elapsedTime = clock.getElapsedTime()
-  const deltaTime = elapsedTime - previousTime
-  previousTime = elapsedTime
-
-  // Update controls
+  
   controls.update(elapsedTime)
+  updateMousePoints()
+  updateRibbons()
 
-  MOUSE_POSITIONS.push(MOUSE.clone())
-
-  if (MOUSE_POSITIONS.length > MAX_MOUSE_POS_LENGTH) {
-    MOUSE_POSITIONS.shift()
+  if (params.active) {
+    composer.render(delta)
+  } else {
+    renderer.render(scene, camera)
   }
 
-  // Ribbon
-  // ribbons.forEach(ribbon => {
-  //   ribbon.material.roughness = params.roughness
-  //   ribbon.material.metalness = params.metalness
-  // })
+  if (params.autoMove) {
+    moveTimestamp += delta
 
-  updateRibbon()
+    if (moveTimestamp > params.moveInterval) {
+      const pos = new THREE.Vector3(
+        THREE.MathUtils.randFloatSpread(5),
+        THREE.MathUtils.randFloatSpread(5),
+        params.anchorPointZ
+      )
+      MOUSE_TARGET.copy(new THREE.Vector2(pos.x, pos.y))
 
-  renderer.render(scene, camera)
+      if (box) {
+        box.position.copy(pos)
+      }
+
+      moveTimestamp = 0
+    }
+  }
+
+  // audio
+  audioAnalyser.update()
+  // console.log(audioAnalyser.fbcArray)
 
   stats.end()
 
@@ -285,9 +457,10 @@ const tick = () => {
 }
 
 addEvents()
-addRibbon()
-addBox()
+addRibbons()
 addLights()
+addHelpers()
+addBloom()
+addAudio()
 addGUI()
-addHelper()
 tick()

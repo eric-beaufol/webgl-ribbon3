@@ -1,6 +1,5 @@
  # Objective
 
- Program an infinite running ribbon, always changing direction
- To do that, i will have to create a dynamic geometry
+ Program an infinite running ribbon, always changing direction according to mouse movement
 
- - Make ribbon's anchor point z position static regardless of camera position
+- make ribbons following music
