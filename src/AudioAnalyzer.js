@@ -1,5 +1,5 @@
 export default class AudioAnalyser {
-  constructor() {
+  constructor(fftSize) {
     this.createAudio()
 
     this.audioCtx = new AudioContext()
@@ -8,7 +8,7 @@ export default class AudioAnalyser {
 
     this.audioSrc.connect(this.analyser)
     this.analyser.connect(this.audioCtx.destination)
-    this.analyser.fftSize = 4096 // max 32768
+    this.analyser.fftSize = fftSize // max 32768
 
     this.bufferLength = this.analyser.frequencyBinCount
     this.fbcArray = new Uint8Array(this.bufferLength)
@@ -16,7 +16,6 @@ export default class AudioAnalyser {
 
   createAudio() {
     this.audio = document.createElement('audio')
-    this.audio.autoplay = true
     document.body.appendChild(this.audio)
   }
 
@@ -26,5 +25,15 @@ export default class AudioAnalyser {
 
   update() {
     this.analyser.getByteFrequencyData(this.fbcArray)
+  }
+
+  play() {
+    this.audioCtx.resume()
+    this.audio.play()
+  }
+
+  stop() {
+    this.audio.pause()
+    this.audio.currentTime = 0
   }
 }

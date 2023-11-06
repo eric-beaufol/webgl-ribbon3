@@ -21,9 +21,9 @@ const params = {
   metalness: .1,
   ribbonHeight: 20,
   ribbonMaxWidth: .5,
-  anchorPointZ: -5,
+  anchorPointZ: -15,
   ribbonRadius: .1,
-  ribbonSegments: 60,
+  ribbonSegments: 160,
   friction: 0.1,
   ribbonsCount: 10,
   followMouse: true,
@@ -38,6 +38,9 @@ const params = {
   exposure: 1,
   // general
   helpers: false,
+  // sound
+  channel: 0,
+  amplitude: 6
 }
 
 // Constants
@@ -45,7 +48,6 @@ const MOUSE_TARGET = new THREE.Vector3()
 const MOUSE = new THREE.Vector3()
 let mousePositions = getMousePositions()
 const ribbons = []
-const colors = ['']
 
 // Stats
 const stats = new Stats()
@@ -236,7 +238,7 @@ const removeRibbons = () => {
 }
 
 const updateRibbons = () => {
-  ribbons.forEach(ribbon => {
+  ribbons.forEach((ribbon) => {
     const position = ribbon.geometry.attributes.position.array
     const basePosition = ribbon.userData.baseGeometry.attributes.position.array
 
@@ -248,7 +250,7 @@ const updateRibbons = () => {
       if (mousePositions[index]) {
         const ratio = i / position.length * params.spread
 
-        position[i + 0] = basePosition[i + 0] + mousePositions[index].x + offset.x * ratio // x
+        position[i + 0] = basePosition[i + 0] + mousePositions[index].x +  offset.x * ratio // x
         position[i + 2] = basePosition[i + 2] + mousePositions[index].y + offset.y * ratio // y
       }
     }
@@ -337,8 +339,8 @@ const addBloom = () => {
 
 let audioAnalyser
 const addAudio = () => {
-  audioAnalyser = new AudioAnalyser()
-  audioAnalyser.setSource('/mp3/quest.mp3')
+  audioAnalyser = new AudioAnalyser(32)
+  audioAnalyser.setSource('/mp3/fern-kinney-im-ready-for-your-love-ramsey-hercules-edit-for-kirsty-p.mp3')
 }
 
 let gui
@@ -360,13 +362,16 @@ const addGUI = () => {
     addHelpers()
     box.position.z = params.anchorPointZ
   })
-  ribbonFolder.add(params, 'radius', .03, 1).onChange(addRibbons)
+  ribbonFolder.add(params, 'ribbonRadius', .03, 1).onChange(() => {
+    removeRibbons()
+    addRibbons()
+  })
   ribbonFolder.add(params, 'ribbonSegments', 10, 200, 1).onChange(() => {
     mousePositions = getMousePositions()
     removeRibbons()
     addRibbons()
   })
-  ribbonFolder.add(params, 'friction', 0.01, .1, .001)
+  ribbonFolder.add(params, 'friction', 0.01, 1, .001)
   ribbonFolder.add(params, 'ribbonsCount', 1, 30, 1).name('count').onChange(() => {
     removeRibbons()
     addRibbons()
@@ -407,6 +412,19 @@ const addGUI = () => {
     addRibbons()
   }
   generalFolder.add(params, 'reset')
+
+  // const soundFolder = gui.addFolder('sound')
+  // soundFolder.add(params, 'channel', 0, 15, 1)
+  // soundFolder.add(params, 'amplitude', 1, 10)
+  
+  // params.play = () => {
+  //   audioAnalyser.play()
+  // }
+  // params.stop = () => {
+  //   audioAnalyser.stop()
+  // }
+  // soundFolder.add(params, 'play')
+  // soundFolder.add(params, 'stop')
 }
 
 let moveTimestamp = 0
@@ -416,6 +434,9 @@ const tick = () => {
 
   const delta = clock.getDelta()
   const elapsedTime = clock.getElapsedTime()
+
+  // audio
+  // audioAnalyser.update()
   
   controls.update(elapsedTime)
   updateMousePoints()
@@ -431,11 +452,20 @@ const tick = () => {
     moveTimestamp += delta
 
     if (moveTimestamp > params.moveInterval) {
+      // const normalizedBass = audioAnalyser.fbcArray[params.channel] / 255 * 2 - 1
+
+      // const pos = new THREE.Vector3(
+      //   0,
+      //   normalizedBass * params.amplitude,
+      //   params.anchorPointZ
+      // )
+
       const pos = new THREE.Vector3(
         THREE.MathUtils.randFloatSpread(5),
         THREE.MathUtils.randFloatSpread(5),
         params.anchorPointZ
       )
+
       MOUSE_TARGET.copy(new THREE.Vector2(pos.x, pos.y))
 
       if (box) {
@@ -445,10 +475,6 @@ const tick = () => {
       moveTimestamp = 0
     }
   }
-
-  // audio
-  audioAnalyser.update()
-  // console.log(audioAnalyser.fbcArray)
 
   stats.end()
 
@@ -461,6 +487,6 @@ addRibbons()
 addLights()
 addHelpers()
 addBloom()
-addAudio()
+// addAudio()
 addGUI()
 tick()
